@@ -1,0 +1,4 @@
+logs/
+*.log
+.bash_history
+.DS_Store
