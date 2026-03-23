@@ -69,7 +69,7 @@ Sao Nexus implements 25 operational tools grouped into 5 tactical categories:
 Clone the repository and ensure execution permissions are granted to the main entry point:
 
 ```bash
-git clone https://github.com/sao2139/sao-nexus-.git
+git clone https://github.com/sao2139/sao_nexus.git
 cd sao_nexus
 chmod +x main.sh
 ```
