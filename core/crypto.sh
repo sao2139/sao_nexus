@@ -9,8 +9,19 @@ function password_gen() {
         sleep 1; return
     fi
     echo -e "${YELLOW}[*] Generando entropía criptográfica ($len caractéres)...${NC}"
-    local pass=$(openssl rand -base64 48 2>/dev/null | tr -dc 'a-zA-Z0-9!@#$%^&*()_+-=' | head -c "$len")
-    [[ -z "$pass" ]] && pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$%^&*()_+-=' | fold -w 256 | head -n 1 | head -c "$len")
+    local pass=""
+    if command -v openssl >/dev/null 2>&1; then
+        pass=$(openssl rand -base64 256 2>/dev/null | tr -dc 'a-zA-Z0-9!@#$%^&*()_+-=' | head -c "$len")
+    fi
+    
+    if [[ -z "$pass" || ${#pass} -lt $len ]]; then
+        pass=$(cat /dev/urandom 2>/dev/null | tr -dc 'a-zA-Z0-9!@#$%^&*()_+-=' | fold -w 512 | head -n 1 | head -c "$len")
+    fi
+    
+    # Fallback extremo para Windows MSYS si ambos fallan
+    if [[ -z "$pass" || ${#pass} -lt $len ]]; then
+        pass=$(date +%s | sha256sum | base64 | head -c "$len")
+    fi
     
     echo -e "${GREEN}[+] Contraseña generada: ${LIGHT_GREEN}$pass${NC}"
     echo ""
@@ -81,6 +92,73 @@ function ssh_key_generator() {
         fi
     else
         echo -e "${RED}[!] SSH-KEYGEN no está nativamente instalado en este host.${NC}"
+    fi
+    echo ""
+    read -p "Presiona Enter..."
+}
+
+function jwt_decoder() {
+    echo -e "\n${CYAN}--- Decodificador Rápido JWT ---${NC}"
+    echo -e "${YELLOW}Decodifica el Header y Payload Data de un token JSON (No verifica firma).${NC}"
+    read -p "Pega el token JWT completo: " jwt
+    [[ -z "$jwt" ]] && return
+    
+    echo -e "\n${GREEN}[+] Analizando estructura...${NC}"
+    local header=$(echo "$jwt" | cut -d'.' -f1)
+    local payload=$(echo "$jwt" | cut -d'.' -f2)
+    
+    if [[ -z "$header" || -z "$payload" ]]; then
+        echo -e "${RED}[!] Token inválido o malformado.${NC}"
+        sleep 1; return
+    fi
+    
+    # Agregar padding Base64URL si es necesario
+    header=$(echo "$header" | sed -e 's/-/+/g' -e 's/_/\//g')
+    payload=$(echo "$payload" | sed -e 's/-/+/g' -e 's/_/\//g')
+    
+    local mod4_h=$((${#header} % 4))
+    local mod4_p=$((${#payload} % 4))
+    
+    if [ $mod4_h -eq 2 ]; then header="${header}=="; elif [ $mod4_h -eq 3 ]; then header="${header}="; fi
+    if [ $mod4_p -eq 2 ]; then payload="${payload}=="; elif [ $mod4_p -eq 3 ]; then payload="${payload}="; fi
+    
+    echo -e "\n${CYAN}[*] HEADER (Algoritmo & Tipo):${NC}"
+    echo "$header" | base64 --decode 2>/dev/null || echo -e "${RED}Error decodificando header.${NC}"
+    
+    echo -e "\n\n${CYAN}[*] PAYLOAD (Datos de sesión y Claims):${NC}"
+    echo "$payload" | base64 --decode 2>/dev/null || echo -e "${RED}Error decodificando payload.${NC}"
+    
+    echo ""
+    log_event "[Crypto] JWT decodificado por el analista."
+    echo ""
+    read -p "Presiona Enter..."
+}
+
+function stego_tool() {
+    echo -e "\n${CYAN}--- Esteganografía: Ocultación de Datos (EOF Append) ---${NC}"
+    echo -e "${YELLOW}Criptografía: Oculta texto al final del código binario de una imagen (JPG/PNG).${NC}"
+    echo -e "1) Ocultar mensaje en imagen"
+    echo -e "2) Leer mensaje oculto de imagen"
+    read -p "> " stego_opt
+    
+    if [[ "$stego_opt" == "1" ]]; then
+        read -p "Ruta de la imagen original (ej. foto.jpg): " img_in
+        if [[ -f "$img_in" ]]; then
+            read -p "Mensaje secreto a ocultar: " secreto
+            echo "$secreto" >> "$img_in"
+            echo -e "${GREEN}[+] Mensaje inyectado silenciosamente en $img_in${NC}"
+            log_event "[Seguridad] Esteganografía: Mensaje inyectado en $img_in"
+        else
+            echo -e "${RED}[!] Archivo de imagen no encontrado.${NC}"
+        fi
+    elif [[ "$stego_opt" == "2" ]]; then
+        read -p "Ruta de la imagen sospechosa: " img_out
+        if command -v strings >/dev/null 2>&1; then
+            echo -e "\n${LIGHT_GREEN}[*] Extrayendo los últimos datos incrustados:${NC}"
+            strings "$img_out" | tail -n 5
+        else
+            tail -n 3 "$img_out"
+        fi
     fi
     echo ""
     read -p "Presiona Enter..."

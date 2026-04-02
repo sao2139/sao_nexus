@@ -74,13 +74,17 @@ function subnet_calc() {
     echo -e "\n${CYAN}--- Calculadora Vectorial de Subredes ---${NC}"
     read -p "Introduce IP con máscara CIDR (ej: 192.168.1.0/24): " ip_cidr
     if [[ "$ip_cidr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]]; then
-        echo -e "\n${YELLOW}[*] Computando red:${NC}"
         local mask="${ip_cidr#*/}"
-        local hosts=$(( (1 << (32 - mask)) - 2 ))
-        [[ $hosts -lt 0 ]] && hosts=0
-        echo -e "Bloque Red CIDR: ${GREEN}/$mask${NC}"
-        echo -e "Nodos Usables:   ${GREEN}$hosts${NC}"
-        log_event "[Red] CIDR $ip_cidr procesado: Bloque /$mask con $hosts host(s) en subred local."
+        if [[ $mask -gt 32 ]]; then
+            echo -e "${RED}[!] Error: La máscara no puede superar /32.${NC}"
+        else
+            echo -e "\n${YELLOW}[*] Computando red:${NC}"
+            local hosts=$(( (1 << (32 - mask)) - 2 ))
+            [[ $hosts -lt 0 ]] && hosts=0
+            echo -e "Bloque Red CIDR: ${GREEN}/$mask${NC}"
+            echo -e "Nodos Usables:   ${GREEN}$hosts${NC}"
+            log_event "[Red] CIDR $ip_cidr procesado: Bloque /$mask con $hosts host(s) en subred local."
+        fi
     else
         echo -e "${RED}[!] CIDR Rechazado.${NC}"
     fi
@@ -269,6 +273,154 @@ function iface_analyzer() {
         ipconfig /all | grep -iE "(Adapter|Física|IPv4|Subnet|Puerta)" | sed 's/^/   /'
     else
          echo -e "${RED}[!] Comandos de lectura de enlaces inhabilitados en el Kernel actual.${NC}"
+    fi
+    echo ""
+    function mac_changer() {
+    echo -e "\n${CYAN}--- Evasión: MAC Address Spoofer ---${NC}"
+    echo -e "${YELLOW}Anonimato: Cambia la dirección física de tu tarjeta de red.${NC}"
+    if command -v macchanger >/dev/null 2>&1; then
+        read -p "Introduce tu interfaz de red (ej. eth0, wlan0): " interfaz
+        [[ -z "$interfaz" ]] && return
+        
+        echo -e "\n${GREEN}[+] Apagando la interfaz $interfaz...${NC}"
+        sudo ip link set dev "$interfaz" down
+        
+        echo -e "${GREEN}[+] Falsificando dirección MAC a una aleatoria...${NC}"
+        sudo macchanger -r "$interfaz" | grep -i "New MAC"
+        
+        echo -e "${GREEN}[+] Levantando la interfaz...${NC}"
+        sudo ip link set dev "$interfaz" up
+        log_event "[Red] Spoofing de MAC ejecutado en la interfaz $interfaz."
+    else
+        echo -e "${RED}[!] La herramienta 'macchanger' no está instalada. Ejecuta: sudo apt install macchanger${NC}"
+    fi
+    echo ""
+    read -p "Presiona Enter..."
+}
+
+function privesc_check() {
+    echo -e "\n${CYAN}--- Escáner Rápido de Escalamiento de Privilegios ---${NC}"
+    echo -e "${YELLOW}Auditoría: Buscando vectores para escalar a ROOT...${NC}\n"
+    
+    echo -e "${LIGHT_GREEN}[*] Verificando permisos SUDO sin contraseña:${NC}"
+    sudo -l 2>/dev/null | grep "NOPASSWD" || echo "  Ninguno o requiere contraseña."
+    
+    echo -e "\n${LIGHT_GREEN}[*] Verificando acceso al archivo /etc/shadow (Hashes):${NC}"
+    if [ -r /etc/shadow ]; then
+        echo -e "  ${RED}[CRÍTICO] ¡El archivo /etc/shadow es legible por tu usuario!${NC}"
+        log_event "[Sistema] VULNERABILIDAD: /etc/shadow es legible sin root."
+    else
+        echo "  Protegido (Seguro)."
+    fi
+
+    echo -e "\n${LIGHT_GREEN}[*] Verificando Tareas Cron globales expuestas:${NC}"
+    cat /etc/crontab 2>/dev/null | grep -v "^#" | grep -v "^$" | head -n 5 || echo "  Sin acceso o vacío."
+    
+    echo ""
+    read -p "Presiona Enter..."
+}
+
+function cron_auditor() {
+    echo -e "\n${CYAN}--- Auditor de Tareas Programadas (Cronjobs) ---${NC}"
+    echo -e "${YELLOW}Auditoría: Buscando persistencia silenciosa o binarios sospechosos.${NC}"
+    
+    if command -v crontab >/dev/null 2>&1; then
+        echo -e "\n${LIGHT_GREEN}[*] Crontab del usuario actual:${NC}"
+        crontab -l 2>/dev/null | grep -v "^#" || echo "  No hay tareas programadas."
+    elif command -v schtasks >/dev/null 2>&1; then
+        echo -e "\n${LIGHT_GREEN}[*] Tareas programadas ejecutándose localmente (Windows):${NC}"
+        schtasks /query /fo LIST 2>/dev/null | grep -iE "TaskName|Ejecutar|RunTime" | head -n 30
+    else
+        echo -e "${RED}[!] Comandos no detectados o permisos denegados.${NC}"
+    fi
+    echo ""
+    read -p "Presiona Enter..."
+}
+
+function file_shredder() {
+    echo -e "\n${CYAN}--- File Shredder Destructor (Anti-Forense) ---${NC}"
+    echo -e "${YELLOW}Advertencia: Esto borrará un archivo irremediablemente sobreescribiendo sus bloques 3 veces.${NC}"
+    read -p "Ruta absoluta del archivo a destruir: " file_path
+    if [[ -f "$file_path" ]]; then
+        local size=$(wc -c < "$file_path" 2>/dev/null || echo "1024")
+        echo -e "${RED}[!] Iniciando sobrescritura de nivel bélico sobre $file_path (Múltiples pasadas)...${NC}"
+        
+        for p in {1..3}; do
+            echo -e "${YELLOW}    -> Pasada $p/3 en progreso...${NC}"
+            if command -v shred >/dev/null 2>&1; then
+                shred -n 1 "$file_path" 2>/dev/null
+            else
+                cat /dev/urandom | head -c "$size" > "$file_path" 2>/dev/null || echo "1" > "$file_path"
+            fi
+            sleep 0.5
+        done
+        rm -f "$file_path" 2>/dev/null
+        log_event "[Seguridad] Archivo $file_path DESTRUIDO satisfactoriamente vía Wiping extremo."
+        echo -e "${GREEN}[+] Archivo desintegrado y eliminado del índice con éxito.${NC}"
+    else
+        echo -e "${RED}[!] El archivo no existe o no se puede acceder a la ruta apuntada.${NC}"
+    fi
+    echo ""
+    read -p "Presiona Enter..."
+}
+
+function ping_sweeper() {
+    echo -e "\n${CYAN}--- Ping Sweeper (Descubrimiento Activo) ---${NC}"
+    echo -e "${YELLOW}Envía ráfagas ICMP a toda una clase C para ver quién está vivo.${NC}"
+    read -p "Introduce el prefijo de tu red (ej. 192.168.1): " network
+    [[ -z "$network" ]] && return
+    
+    echo -e "\n${GREEN}[+] Sondeando red $network.1 - 254 ...${NC}"
+    log_event "[Red] Empezando Sweep de Ping interactivo hacia la red $network.*"
+    local count=0
+    
+    # Check OS env for correct ping loop timeout
+    local is_win=false
+    if [[ "$(uname -o 2>/dev/null || uname -s)" == *"Windows"* || "$(uname -a)" == *"MINGW"* || "$(uname -a)" == *"CYGWIN"* || "$(uname -a)" == *"MSYS"* ]]; then
+        is_win=true
+    fi
+
+    # Lógica pseudo-paralela en bash nativo
+    for ip in {1..254}; do
+        local target="${network}.${ip}"
+        if [ "$is_win" = true ]; then
+            ping -n 1 -w 200 "$target" >/dev/null 2>&1 && { echo -e "${LIGHT_GREEN}[+] HOST VIVO DETECTADO:${NC} $target"; } &
+        else
+            ping -c 1 -W 1 "$target" >/dev/null 2>&1 && { echo -e "${LIGHT_GREEN}[+] HOST VIVO DETECTADO:${NC} $target"; } &
+        fi
+    done
+    wait # Hold until all background pings exit
+    
+    echo -e "\n${CYAN}[*] Escaneo términado.${NC}"
+    read -p "Presiona Enter..."
+}
+
+function mac_spoofer() {
+    echo -e "\n${CYAN}--- Cambiador de MAC (Spoofing Físico) ---${NC}"
+    echo -e "${YELLOW}Esta herramienta requiere modificar enlaces a nivel ROOT (Linux/macOS).${NC}"
+    read -p "Nombre de la interfaz (ej. eth0, wlan0): " iface
+    [[ -z "$iface" ]] && return
+    
+    # Genera MAC aleatoria válida local Unicast
+    local hexchars=(0 1 2 3 4 5 6 7 8 9 a b c d e f)
+    local m1=${hexchars[$((RANDOM%16))]}; local m2="2" # X2, X6, XA, XE is locally administered 
+    local new_mac="${m1}${m2}:$(printf '%02x:%02x:%02x:%02x:%02x\n' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
+    
+    echo -e "${GREEN}[+] Solicitando cambio a MAC aleatoria: ${LIGHT_GREEN}$new_mac${NC}"
+    if command -v macchanger >/dev/null 2>&1; then
+        macchanger -m "$new_mac" "$iface" 2>/dev/null && echo -e "${GREEN}[+] MAC Modificada con éxito.${NC}" || echo -e "${RED}[!] Permiso denegado.${NC}"
+    elif command -v ip >/dev/null 2>&1; then
+        ip link set dev "$iface" down 2>/dev/null
+        ip link set dev "$iface" address "$new_mac" 2>/dev/null
+        ip link set dev "$iface" up 2>/dev/null
+        if [[ $? -eq 0 ]]; then
+            echo -e "${GREEN}[+] Nueva MAC enlazada estáticamente en $iface.${NC}"
+            log_event "[Red] Spoofer MAC ejecutado. Nueva identidad hardware: $new_mac"
+        else
+            echo -e "${RED}[!] Falló el cambio de identidad (¿Interfaz ocupada o permisos insuficientes?).${NC}"
+        fi
+    else
+        echo -e "${RED}[!] Herramienta no disponible en este SO.${NC}"
     fi
     echo ""
     read -p "Presiona Enter..."
